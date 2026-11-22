@@ -15,8 +15,8 @@ st.set_page_config(
 # Chargement du modèle
 @st.cache_resource
 def load_model():
-    model = joblib.load("Models/best_model.pkl")
-    vectorizer = joblib.load("Models/tfidf_vectorizer.pkl")
+    model = joblib.load("models/best_model.pkl")
+    vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
     return model, vectorizer
 
 # Chargement du dataset
