@@ -235,6 +235,10 @@ def load_data():
             return []
 
     data["Ingredients_List"] = data["Ingredients_List"].apply(parse_ingredients)
+
+    # Le CSV contient des lignes en double pour un même plat : on garde 1 ligne par plat
+    key = data["Recipe_Name"].astype(str).str.strip().str.lower()
+    data = data.loc[~key.duplicated()].reset_index(drop=True)
     return data
 
 
@@ -492,7 +496,7 @@ def display_ingredient(ingredient):
 # =====================================
 @st.cache_data
 def build_options(_data, min_recipes=2):
-    """Ingrédients de base, triés du plus courant au plus rare.
+    """Ingrédients de base, triés par ordre alphabétique.
     Ceux présents dans une seule recette (souvent du bruit) sont masqués."""
     counts = {}
     for ingredients in _data["Ingredients_Split"]:
@@ -502,7 +506,7 @@ def build_options(_data, min_recipes=2):
                 if n:
                     counts[n] = counts.get(n, 0) + 1
     kept = {n: c for n, c in counts.items() if c >= min_recipes} or counts
-    ordered = sorted(kept, key=lambda n: (-kept[n], n))
+    ordered = sorted(kept)
     return ordered, kept
 
 
@@ -649,10 +653,11 @@ with st.container(border=True):
     selected_ingredients = st.multiselect(
         "Sélectionnez vos ingrédients",
         options=ingredient_options,
-        format_func=lambda n: f"{to_french(n)}  ·  {ingredient_counts.get(n, 0)} recettes",
+        format_func=lambda n: f"{to_french(n)}  ·  {ingredient_counts.get(n, 0)} plats",
         placeholder="Tapez pour rechercher : tomates, lentilles, oignon...",
         label_visibility="collapsed",
     )
+    st.caption(f"{len(data)} plats dans la base · {len(ingredient_options)} ingrédients disponibles")
     c1, c2 = st.columns([2, 1])
     with c1:
         number_recipes = st.slider("Nombre de recettes à afficher", 1, 10, 5)
