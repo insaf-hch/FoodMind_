@@ -331,6 +331,44 @@ def clean_ingredient_name(ingredient):
 
 
 # =====================================
+# 4a. SEPARATION DES INGREDIENTS COLLES ENSEMBLE
+# =====================================
+_PREP_ONLY = re.compile(
+    r"^(?:finely|roughly|thinly|freshly|coarsely)?\s*(?:chopped|diced|minced|sliced|drained|rinsed|divided|"
+    r"peeled|melted|optional|to taste|for |plus |or more|cut |halved|at room|softened|packed|toasted|"
+    r"grated|crushed|cubed|about|approximately)", re.I)
+_MID_QTY = re.compile(rf"(?<![\d/.\-])\s+(?=(?:{_QTY})\s*-?\s*(?:{_UNIT}|{_CONTAINER})\b)", re.I)
+
+
+def split_item(item):
+    """Sépare un texte qui contient plusieurs ingrédients collés :
+    retours à la ligne, ';', '•', listes séparées par des virgules,
+    ou 'quantité + unité' qui se suivent sans séparateur."""
+    if not isinstance(item, str):
+        return []
+    s = re.sub(r"<[^>]*>", " ", html.unescape(item)).replace("\xa0", " ")
+    out = []
+    for part in re.split(r"[\n\r;•|]+", s):
+        part = part.strip()
+        if not part:
+            continue
+        pieces = [p.strip() for p in part.split(",")]
+        kept = [p for p in pieces if p and not _PREP_ONLY.match(p)]
+        # Une vraie liste : plusieurs virgules et au moins 2 éléments qui sont des ingrédients
+        chunks = kept if len(pieces) >= 3 and len(kept) >= 2 else [part]
+        for chunk in chunks:
+            out.extend(c.strip() for c in _MID_QTY.split(chunk) if c.strip())
+    return out
+
+
+def split_ingredients(ingredients):
+    result = []
+    for ing in ingredients if isinstance(ingredients, list) else []:
+        result.extend(split_item(ing))
+    return result
+
+
+# =====================================
 # 4b. TRADUCTION FRANCAISE DES INGREDIENTS
 # =====================================
 FR = {
@@ -457,7 +495,7 @@ def build_options(_data, min_recipes=2):
     """Ingrédients de base, triés du plus courant au plus rare.
     Ceux présents dans une seule recette (souvent du bruit) sont masqués."""
     counts = {}
-    for ingredients in _data["Ingredients_List"]:
+    for ingredients in _data["Ingredients_Split"]:
         if isinstance(ingredients, list):
             names = {clean_ingredient_name(i) for i in ingredients}
             for n in names:
@@ -468,6 +506,7 @@ def build_options(_data, min_recipes=2):
     return ordered, kept
 
 
+data["Ingredients_Split"] = data["Ingredients_List"].apply(split_ingredients)
 ingredient_options, ingredient_counts = build_options(data)
 
 
@@ -713,7 +752,7 @@ if search:
                 [{
                     "Recipe_Name": r["Recipe_Name"],
                     "Description": r["Description"],
-                    "Ingredients": r["Ingredients_List"],
+                    "Ingredients": r["Ingredients_Split"],
                     "Score": float(s),
                     "Image": (r[IMAGE_COL] if IMAGE_COL and isinstance(r[IMAGE_COL], str)
                               and r[IMAGE_COL].startswith("http") else None),
