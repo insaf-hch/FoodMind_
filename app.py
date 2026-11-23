@@ -139,73 +139,62 @@ data = load_data()
 # 4. NETTOYAGE DES INGREDIENTS
 # =====================================
 def clean_ingredient_name(ingredient):
+    """Retourne le nom de l'ingrédient sans quantité ni unité."""
     if not isinstance(ingredient, str):
         return None
 
-    # Décoder HTML et nettoyer les espaces
     ingredient = html.unescape(ingredient)
     ingredient = ingredient.replace("\xa0", " ").lower().strip()
-
-    # Supprimer les balises HTML, le contenu entre parenthèses
-    # et les caractères décoratifs au début
     ingredient = re.sub(r"<[^>]*>", "", ingredient)
-    ingredient = re.sub(r"\([^)]*\)", "", ingredient)
+    ingredient = re.sub(r"\([^)]*\)", " ", ingredient)
+    ingredient = re.sub(r"[\"'“”‘’]", "", ingredient)
     ingredient = re.sub(r"^[\s*•\-–]+", "", ingredient)
 
-    # Supprimer les guillemets
-    ingredient = re.sub(r"[\"'“”‘’]", "", ingredient)
-
-    # Supprimer les quantités : 1/2, 0.5, 1 1/2, etc.
+    # Quantités avec unité : 15-ounce, 16 oz., 0.5 tsp, 1/2 cup...
+    quantity = r"(?:(?:\d+\s+)?\d+(?:\.\d+)?(?:\s*/\s*\d+)?|½|¼|¾)"
     ingredient = re.sub(
-        r"^\s*(?:(?:\d+\s+)?\d+\s*/\s*\d+|\d+(?:\.\d+)?|½|¼|¾)\s*",
-        "",
-        ingredient
+        rf"^\s*{quantity}\s*-?\s*(?:ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kg|ml|cups?|tablespoons?|tbsp|teaspoons?|tsp|liters?|litres?)\s+",
+        "", ingredient
+    )
+    # Quantité seule : 2 avocados, 16 onions
+    ingredient = re.sub(rf"^\s*{quantity}\s+", "", ingredient)
+
+    # Conditionnements et unités restantes
+    ingredient = re.sub(
+        r"^(?:cans?|cartons?|bags?|packages?|pkgs?\.?|boxes?|jars?|bottles?|containers?|cloves?|slices?|bunches?|pinches?)\s+",
+        "", ingredient
+    )
+    ingredient = re.sub(
+        r"^(?:ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kg|ml|cups?|tablespoons?|tbsp|teaspoons?|tsp)\s+",
+        "", ingredient
     )
 
-    # Supprimer les unités de mesure
+    # Indications de préparation au début et précisions à la fin
     ingredient = re.sub(
-        r"^(cups?|tablespoons?|tbsp|teaspoons?|tsp|"
-        r"ounces?|oz|pounds?|lbs?|grams?|g|kg|ml|"
-        r"liters?|pints?|quarts?|cloves?|cans?|packets?|"
-        r"slices?|bunches?|pinches?)\s+",
-        "",
-        ingredient
+        r"^(?:freshly\s+)?(?:finely\s+|roughly\s+)?(?:chopped|diced|minced|mashed|sliced|roasted|grated|crushed|shredded)\s+",
+        "", ingredient
     )
-
-    # Supprimer les indications de préparation au début
     ingredient = re.sub(
-        r"^(freshly roasted|freshly grated|finely chopped|"
-        r"roughly chopped|chopped|diced|minced|mashed|"
-        r"sliced|roasted|grated)\s+",
-        "",
-        ingredient
+        r",?\s*(?:drained|rinsed|divided|for serving|for garnish)\s*$",
+        "", ingredient
     )
-
-    ingredient = re.sub(r"\s+", " ", ingredient)
-    ingredient = ingredient.strip(" \t\n,;:.-*")
+    ingredient = re.sub(r"\s+", " ", ingredient).strip(" \t\n,;:.-*")
 
     if not ingredient:
         return None
 
-    # Rejeter les phrases et commentaires
-    invalid_phrases = [
-        "can also", "can be added", "added to",
-        "to the vegetables", "optional", "for serving",
-        "for garnish", "according to taste", "about"
-    ]
+    invalid_phrases = (
+        "can also", "can be added", "added to", "to the vegetables",
+        "optional", "for serving", "for garnish", "according to taste", "about",
+    )
     if any(phrase in ingredient for phrase in invalid_phrases):
         return None
 
-    # Rejeter les fragments qui ne sont pas des ingrédients
     invalid_only = {
-        "freshly", "roasted", "chopped", "diced",
-        "minced", "sliced", "mashed", "grated"
+        "freshly", "roasted", "chopped", "diced", "minced",
+        "sliced", "mashed", "grated", "drained", "rinsed",
     }
-    if ingredient in invalid_only:
-        return None
-
-    # Éviter les descriptions trop longues
-    if len(ingredient.split()) > 5:
+    if ingredient in invalid_only or len(ingredient.split()) > 6:
         return None
 
     return ingredient
@@ -260,27 +249,48 @@ number_recipes = st.slider(
 # =====================================
 # 7. RECUPERATION DES IMAGES
 # =====================================
-@st.cache_data
-
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_recipe_image(recipe_name):
-    url = "https://www.themealdb.com/api/json/v1/1/search.php"
+    """Cherche une image sur TheMealDB, puis Wikimedia Commons."""
+    if not isinstance(recipe_name, str) or not recipe_name.strip():
+        return None
 
+    # 1) TheMealDB
+    mealdb_url = "https://www.themealdb.com/api/json/v1/1/search.php"
     try:
         response = requests.get(
-            url,
-            params={"s": recipe_name},
-            timeout=10
+            mealdb_url, params={"s": recipe_name.strip()}, timeout=8
         )
         response.raise_for_status()
+        meals = response.json().get("meals")
+        if meals and meals[0].get("strMealThumb"):
+            return meals[0]["strMealThumb"]
+    except (requests.RequestException, ValueError, TypeError):
+        pass
 
-        image_data = response.json()
-        meals = image_data.get("meals")
-
-        if meals:
-            return meals[0].get("strMealThumb")
-
-    except (requests.RequestException, ValueError):
-        return None
+    # 2) Secours : recherche d'image sur Wikimedia Commons
+    commons_url = "https://commons.wikimedia.org/w/api.php"
+    try:
+        response = requests.get(
+            commons_url,
+            params={
+                "action": "query", "generator": "search",
+                "gsrsearch": f"{recipe_name.strip()} food",
+                "gsrnamespace": 6, "gsrlimit": 5,
+                "prop": "imageinfo", "iiprop": "url",
+                "iiurlwidth": 700, "format": "json",
+            },
+            headers={"User-Agent": "FoodMindRecipeApp/1.0"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        pages = response.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            info = page.get("imageinfo", [])
+            if info:
+                return info[0].get("thumburl") or info[0].get("url")
+    except (requests.RequestException, ValueError, TypeError):
+        pass
 
     return None
 
