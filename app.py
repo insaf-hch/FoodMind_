@@ -4,24 +4,36 @@ import pandas as pd
 import numpy as np
 import joblib
 import ast
+import re
 
-# Configuration de la page
+# =====================================
+# 1. CONFIGURATION
+# =====================================
+
 st.set_page_config(
     page_title="FoodMind",
     page_icon="🍲",
     layout="wide"
 )
 
-# Chargement du modèle
+# =====================================
+# 2. CHARGEMENT DU MODELE
+# =====================================
+
 @st.cache_resource
 def load_model():
     model = joblib.load("models/best_model.pkl")
     vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
     return model, vectorizer
 
-# Chargement du dataset
+
+# =====================================
+# 3. CHARGEMENT DU DATASET
+# =====================================
+
 @st.cache_data
 def load_data():
+
     data = pd.read_csv(
         "Dataset_ProjetIA_food/moroccan_recipes_model_ready.csv"
     )
@@ -38,11 +50,72 @@ def load_data():
 
     return data
 
+
 model, vectorizer = load_model()
 data = load_data()
 
-# Interface
+
+# =====================================
+# 4. NETTOYAGE DES INGREDIENTS
+# =====================================
+
+def clean_ingredient_name(ingredient):
+
+    ingredient = str(ingredient).lower().strip()
+
+    ingredient = re.sub(r"\([^)]*\)", "", ingredient)
+
+    ingredient = ingredient.split(",")[0]
+
+    ingredient = re.sub(
+        r"^\s*(?:\d+\s+)?\d+(?:\s*/\s*\d+)?\s*",
+        "",
+        ingredient
+    )
+
+    ingredient = re.sub(
+        r"^(cups?|tablespoons?|tbsp|teaspoons?|tsp|"
+        r"ounces?|oz|pounds?|lbs?|grams?|g|kg|ml|"
+        r"cloves?|cans?|packets?|slices?|bunches?)\s+",
+        "",
+        ingredient
+    )
+
+    ingredient = re.sub(
+        r"^(finely chopped|chopped|diced|minced|mashed|sliced)\s+",
+        "",
+        ingredient
+    )
+
+    return ingredient.strip()
+
+
+# =====================================
+# 5. GENERATION DE LA LISTE
+# =====================================
+
+ingredient_options = set()
+
+for ingredients in data["Ingredients_List"]:
+
+    if isinstance(ingredients, list):
+
+        for ingredient in ingredients:
+
+            name = clean_ingredient_name(ingredient)
+
+            if name and len(name) > 1:
+                ingredient_options.add(name)
+
+ingredient_options = sorted(ingredient_options)
+
+
+# =====================================
+# 6. INTERFACE FOODMIND
+# =====================================
+
 st.title("🍲 FoodMind")
+
 st.subheader("Votre assistant intelligent de recettes")
 
 st.write(
@@ -50,13 +123,20 @@ st.write(
     "que vous avez disponibles."
 )
 
-# Saisie des ingrédients
-ingredients_input = st.text_input(
-    "Quels ingrédients avez-vous ?",
-    placeholder="Exemple : chicken, onion, garlic, olive oil"
+st.markdown("---")
+
+st.header("🥕 Quels ingrédients avez-vous ?")
+
+selected_ingredients = st.multiselect(
+    "Sélectionnez vos ingrédients :",
+    options=ingredient_options,
+    placeholder="Rechercher un ingrédient...",
 )
 
-# Nombre de recettes
+st.caption(
+    f"{len(selected_ingredients)} ingrédient(s) sélectionné(s)"
+)
+
 number_recipes = st.slider(
     "Nombre de recettes à afficher",
     min_value=1,
@@ -64,45 +144,49 @@ number_recipes = st.slider(
     value=5
 )
 
-# Recherche des recettes
-if st.button("Rechercher des recettes"):
 
-    if not ingredients_input.strip():
-        st.warning("Veuillez saisir au moins un ingrédient.")
+# =====================================
+# 7. RECHERCHE DES RECETTES
+# =====================================
+
+if st.button("🔎 Rechercher des recettes", type="primary"):
+
+    if not selected_ingredients:
+
+        st.warning("Veuillez sélectionner au moins un ingrédient.")
 
     else:
-        panier = [
-            item.strip().lower()
-            for item in ingredients_input.split(",")
-            if item.strip()
-        ]
+
+        panier = selected_ingredients
 
         results = []
 
-        for _, row in data.iterrows():
+        with st.spinner("Recherche des meilleures recettes..."):
 
-            recipe_ingredients = row["Ingredients_List"]
+            for _, row in data.iterrows():
 
-            if not recipe_ingredients:
-                continue
+                recipe_ingredients = row["Ingredients_List"]
 
-            texte = (
-                "panier " + " ".join(panier)
-                + " recette " + " ".join(recipe_ingredients)
-            )
+                if not recipe_ingredients:
+                    continue
 
-            X = vectorizer.transform([texte])
+                texte = (
+                    "panier " + " ".join(panier)
+                    + " recette " + " ".join(recipe_ingredients)
+                )
 
-            score = model.predict(X)[0]
+                X = vectorizer.transform([texte])
 
-            score = float(np.clip(score, 0, 1))
+                score = model.predict(X)[0]
 
-            results.append({
-                "Recipe_Name": row["Recipe_Name"],
-                "Description": row["Description"],
-                "Ingredients": recipe_ingredients,
-                "Score": score
-            })
+                score = float(np.clip(score, 0, 1))
+
+                results.append({
+                    "Recipe_Name": row["Recipe_Name"],
+                    "Description": row["Description"],
+                    "Ingredients": recipe_ingredients,
+                    "Score": score
+                })
 
         results = sorted(
             results,
@@ -112,18 +196,23 @@ if st.button("Rechercher des recettes"):
 
         st.success("Recherche terminée !")
 
+        st.subheader("🍽️ Recettes recommandées")
+
         for recipe in results[:number_recipes]:
 
             st.markdown("---")
 
             st.subheader(recipe["Recipe_Name"])
 
-            st.write(recipe["Description"])
+            if pd.notna(recipe["Description"]):
+                st.write(recipe["Description"])
+            else:
+                st.write("Aucune description disponible.")
 
-            st.write(
-                "**Ingrédients nécessaires :**",
-                ", ".join(recipe["Ingredients"])
-            )
+            st.write("**Ingrédients nécessaires :**")
+
+            for ingredient in recipe["Ingredients"]:
+                st.write(f"• {ingredient}")
 
             st.progress(recipe["Score"])
 
