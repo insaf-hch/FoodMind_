@@ -5,6 +5,8 @@ import numpy as np
 import joblib
 import ast
 import re
+import requests
+import html
 
 # =====================================
 # 1. CONFIGURATION
@@ -59,35 +61,66 @@ data = load_data()
 # 4. NETTOYAGE DES INGREDIENTS
 # =====================================
 
+
 def clean_ingredient_name(ingredient):
 
-    ingredient = str(ingredient).lower().strip()
+    if not isinstance(ingredient, str):
+        return None
 
-    ingredient = re.sub(r"\([^)]*\)", "", ingredient)
+    # Décoder les caractères HTML (&nbsp;, etc.)
+    ingredient = html.unescape(ingredient)
 
-    ingredient = ingredient.split(",")[0]
+    ingredient = ingredient.replace("\xa0", " ")
+    ingredient = ingredient.lower().strip()
 
-    ingredient = re.sub(
-        r"^\s*(?:\d+\s+)?\d+(?:\s*/\s*\d+)?\s*",
-        "",
-        ingredient
-    )
 
+    # Supprimer les unités de mesure
     ingredient = re.sub(
         r"^(cups?|tablespoons?|tbsp|teaspoons?|tsp|"
         r"ounces?|oz|pounds?|lbs?|grams?|g|kg|ml|"
-        r"cloves?|cans?|packets?|slices?|bunches?)\s+",
+        r"liters?|cloves?|cans?|packets?|slices?|"
+        r"bunches?|pinches?)\s+",
         "",
         ingredient
     )
 
+    # Supprimer les descriptions de préparation
     ingredient = re.sub(
-        r"^(finely chopped|chopped|diced|minced|mashed|sliced)\s+",
+        r"^(finely chopped|chopped|diced|minced|"
+        r"mashed|sliced|freshly grated)\s+",
         "",
         ingredient
     )
 
-    return ingredient.strip()
+    ingredient = ingredient.strip(" \t\n,;:.-*")
+
+    # Éliminer les valeurs vides
+    if not ingredient:
+        return None
+
+    # Éliminer les phrases descriptives
+    invalid_phrases = [
+        "can also",
+        "can be added",
+        "added to",
+        "to the vegetables",
+        "optional",
+        "for serving",
+        "for garnish",
+        "according to taste"
+    ]
+
+    if any(phrase in ingredient for phrase in invalid_phrases):
+        return None
+
+    # Éliminer les valeurs trop longues ou contenant du HTML
+    if len(ingredient.split()) > 5:
+        return None
+
+    if "<" in ingredient or ">" in ingredient:
+        return None
+
+    return ingredient
 
 
 # =====================================
@@ -108,7 +141,6 @@ for ingredients in data["Ingredients_List"]:
                 ingredient_options.add(name)
 
 ingredient_options = sorted(ingredient_options)
-
 
 # =====================================
 # 6. INTERFACE FOODMIND
@@ -143,6 +175,30 @@ number_recipes = st.slider(
     max_value=10,
     value=5
 )
+
+
+@st.cache_data
+def get_recipe_image(recipe_name):
+    url = "https://www.themealdb.com/api/json/v1/1/search.php"
+
+    try:
+        response = requests.get(
+            url,
+            params={"s": recipe_name},
+            timeout=10
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        meals = data.get("meals")
+
+        if meals:
+            return meals[0].get("strMealThumb")
+
+    except requests.RequestException:
+        return None
+
+    return None
 
 
 # =====================================
@@ -198,24 +254,39 @@ if st.button("🔎 Rechercher des recettes", type="primary"):
 
         st.subheader("🍽️ Recettes recommandées")
 
-        for recipe in results[:number_recipes]:
+       
+for recipe in results[:number_recipes]:
 
-            st.markdown("---")
+    st.markdown("---")
 
-            st.subheader(recipe["Recipe_Name"])
+    col1, col2 = st.columns([1, 2])
 
-            if pd.notna(recipe["Description"]):
-                st.write(recipe["Description"])
-            else:
-                st.write("Aucune description disponible.")
+    with col1:
 
-            st.write("**Ingrédients nécessaires :**")
+        image_url = get_recipe_image(recipe["Recipe_Name"])
 
-            for ingredient in recipe["Ingredients"]:
-                st.write(f"• {ingredient}")
+        if image_url:
+            st.image(image_url, use_container_width=True)
+        else:
+            st.info("Image non disponible pour ce plat.")
 
-            st.progress(recipe["Score"])
+    with col2:
 
-            st.write(
-                f"Score prédit : {recipe['Score'] * 100:.1f} %"
-            )
+        st.subheader(recipe["Recipe_Name"])
+
+        if pd.notna(recipe["Description"]):
+            st.write(recipe["Description"])
+        else:
+            st.write("Aucune description disponible.")
+
+        st.write("**Ingrédients nécessaires :**")
+
+        for ingredient in recipe["Ingredients"]:
+            st.write(f"• {ingredient}")
+
+        st.progress(recipe["Score"])
+
+        st.write(
+            f"Score prédit : {recipe['Score'] * 100:.1f} %"
+        )
+
