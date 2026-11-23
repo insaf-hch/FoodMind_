@@ -100,6 +100,22 @@ span[data-baseweb="tag"] {
 }
 span[data-baseweb="tag"] span { color: #fff !important; }
 
+/* Forcer le thème clair, même si le navigateur est en mode sombre */
+.stApp label, .stApp [data-testid="stWidgetLabel"] p, .stApp [data-testid="stWidgetLabel"] {
+    color: var(--ink) !important;
+}
+.stApp [data-baseweb="select"] > div, .stApp [data-baseweb="select"] input {
+    background-color: var(--bg) !important;
+    color: var(--ink) !important;
+}
+[data-baseweb="tag"] { background-color: var(--green) !important; color: #fff !important; border-radius: 999px !important; }
+[data-baseweb="tag"] * { color: #fff !important; }
+[data-baseweb="popover"] ul, [data-baseweb="popover"] li, [data-baseweb="menu"] {
+    background-color: #fff !important; color: var(--ink) !important;
+}
+[data-baseweb="popover"] li:hover { background-color: var(--mint) !important; }
+.stApp [data-baseweb="select"] svg { fill: var(--muted) !important; }
+
 /* Curseur */
 div[data-baseweb="slider"] [role="slider"] { background: var(--green) !important; }
 div[data-testid="stSliderThumbValue"] { color: var(--green) !important; }
@@ -131,10 +147,10 @@ div[data-testid="stSliderThumbValue"] { color: var(--green) !important; }
     margin-bottom: 1.4rem;
 }
 .fm-img {
-    flex: 0 0 300px; min-height: 260px;
+    flex: 0 0 300px; min-height: 260px; align-self: stretch;
     background: var(--mint);
     display: flex; align-items: center; justify-content: center;
-    font-size: 4rem;
+    font-size: 4.5rem; line-height: 1;
 }
 .fm-img img {
     width: 100%; height: 100%; object-fit: cover; display: block;
@@ -168,6 +184,21 @@ div[data-testid="stSliderThumbValue"] { color: var(--green) !important; }
     padding: .22rem .7rem; border-radius: 999px;
 }
 .fm-chip.hit { background: var(--mint); border-color: #A9D5C7; color: var(--green-dark); font-weight: 600; }
+
+
+/* Forcer des champs clairs (même si le thème Streamlit est sombre) */
+.stApp, .stApp p, .stApp label, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label { color: var(--ink) !important; }
+[data-testid="stWidgetLabel"] p { font-weight: 600; }
+.stMultiSelect [data-baseweb="select"] > div { background: #fff !important; color: var(--ink) !important; }
+.stMultiSelect input { color: var(--ink) !important; -webkit-text-fill-color: var(--ink) !important; }
+.stMultiSelect svg { fill: var(--muted) !important; }
+div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li { background: #fff !important; color: var(--ink) !important; }
+div[data-baseweb="popover"] li:hover { background: var(--mint) !important; }
+div[data-baseweb="slider"] > div > div { background: var(--line); }
+div[data-baseweb="slider"] > div > div > div { background: var(--green) !important; }
+div[data-testid="stSliderTickBarMin"], div[data-testid="stSliderTickBarMax"] { color: var(--muted) !important; }
+.fm-img.ph { flex-direction: column; gap: .6rem; font-size: 4.2rem; }
+.fm-img.ph span { font-family: 'Figtree', sans-serif; font-size: .9rem; font-weight: 600; color: var(--green); }
 
 @media (max-width: 760px) {
     .fm-hero { padding: 2rem 1.5rem; }
@@ -222,10 +253,12 @@ _CONTAINER = (r"(?:cans?|cartons?|bags?|packages?|packets?|pkgs?|boxes?|jars?|bo
               r"heads?|stalks?|handfuls?|dashes?|sticks?)")
 _WORDS = (r"(?:large|medium|small|big|whole|prepared|fresh|freshly|dried|canned|frozen|"
           r"ripe|raw|cooked|chopped|diced|minced|mashed|sliced|roasted|grated|crushed|"
-          r"shredded|finely|roughly|thinly|peeled|pitted|packed|heaping|level)")
+          r"shredded|finely|roughly|thinly|peeled|pitted|packed|heaping|level|cubed|cut|"
+          r"halved|quartered|trimmed|boneless|skinless|toasted|rinsed|drained|softened|melted)")
 
 _LEADING = re.compile(
-    rf"^\s*(?:{_QTY}\s*-?\s*)?"
+    rf"^\s*(?:(?:and|or|plus|with|of|the|a|an)\s+)?"
+    rf"(?:{_QTY}\s*-?\s*)?"
     rf"(?:{_UNIT}\b\.?\s*-?\s*)?"
     rf"(?:{_CONTAINER}\b\.?\s+(?=\S))?"
     rf"(?:of\s+)?"
@@ -245,17 +278,26 @@ def clean_ingredient_name(ingredient):
     text = re.sub(r"[\"'“”‘’]", "", text)
     text = re.sub(r"^[\s*•\-–]+", "", text)
 
+    # Mots parasites issus du scraping (publicités, etc.)
+    text = re.sub(r"\b(?:advertisement|advertising|ad)\b", " ", text)
+
     # Tout ce qui suit la première virgule est une précision (drained, to taste...)
     text = text.split(",")[0]
     # "butter or margarine" -> "butter"
     text = re.split(r"\s+(?:or|plus)\s+", text)[0]
 
-    # On retire plusieurs fois le début (quantité, unité, boîte, adjectifs)
-    for _ in range(4):
+    # Mots parasites issus du scraping (publicités, liens...)
+    text = re.sub(r"\b(?:advertisement|advertising|sponsored)\b", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # On retire plusieurs fois le début (quantité, unité, boîte, adjectifs, "and"...)
+    for _ in range(5):
         new = _LEADING.sub("", text).strip()
+        new = re.sub(r"^(?:and|or|plus|with|of|a|an|the)\s+(?=\S)", "", new)
         if new == text:
             break
         text = new
+    text = re.sub(r"\s+(?:and|or|with)$", "", text)
 
     # Fins de phrase inutiles
     text = re.sub(r"\s+(?:to taste|for serving|for garnish|as needed|divided|drained|rinsed)$", "", text)
@@ -274,12 +316,102 @@ def clean_ingredient_name(ingredient):
     return text
 
 
+# =====================================
+# 4b. TRADUCTION FRANCAISE DES INGREDIENTS
+# =====================================
+FR = {
+ # phrases
+ "ground black pepper":"poivre noir moulu","black pepper":"poivre noir","sweet potatoes":"patates douces",
+ "sweet potato":"patate douce","olive oil":"huile d'olive","vegetable oil":"huile végétale",
+ "coconut oil":"huile de coco","sesame oil":"huile de sésame","chicken broth":"bouillon de poulet",
+ "vegetable broth":"bouillon de légumes","beef broth":"bouillon de bœuf","chicken stock":"bouillon de poulet",
+ "vegetable stock":"bouillon de légumes","cherry tomatoes":"tomates cerises","tomato paste":"concentré de tomate",
+ "tomato sauce":"sauce tomate","diced tomatoes":"tomates en dés","crushed tomatoes":"tomates concassées",
+ "lemon juice":"jus de citron","lemon zest":"zeste de citron","orange juice":"jus d'orange",
+ "orange zest":"zeste d'orange","brown sugar":"sucre roux","powdered sugar":"sucre glace",
+ "all-purpose flour":"farine tout usage","baking powder":"levure chimique","baking soda":"bicarbonate de soude",
+ "sea salt":"sel de mer","kosher salt":"sel casher","white wine":"vin blanc","red wine":"vin rouge",
+ "greek yogurt":"yaourt grec","plain yogurt":"yaourt nature","heavy cream":"crème épaisse",
+ "sour cream":"crème aigre","unsalted butter":"beurre doux","red lentils":"lentilles corail",
+ "green lentils":"lentilles vertes","white pearl onions":"oignons grelots blancs","pearl onions":"oignons grelots",
+ "lentil soup":"soupe de lentilles","red onion":"oignon rouge","red onions":"oignons rouges",
+ "yellow onion":"oignon jaune","white onion":"oignon blanc","green onions":"oignons verts",
+ "green onion":"oignon vert","red pepper":"poivron rouge","red bell pepper":"poivron rouge",
+ "green bell pepper":"poivron vert","bell pepper":"poivron","bell peppers":"poivrons","green beans":"haricots verts",
+ "garlic cloves":"gousses d'ail","cloves garlic":"gousses d'ail","clove garlic":"gousse d'ail",
+ "garlic powder":"ail en poudre","onion powder":"oignon en poudre","smoked paprika":"paprika fumé",
+ "chili powder":"piment en poudre","chili flakes":"flocons de piment","red pepper flakes":"flocons de piment",
+ "bay leaves":"feuilles de laurier","bay leaf":"feuille de laurier","preserved lemons":"citrons confits",
+ "preserved lemon":"citron confit","sesame seeds":"graines de sésame","pine nuts":"pignons de pin",
+ "coconut milk":"lait de coco","soy sauce":"sauce soja","vanilla extract":"extrait de vanille",
+ "cocoa powder":"cacao en poudre","ras el hanout":"ras el hanout","orange blossom water":"eau de fleur d'oranger",
+ "rose water":"eau de rose","chickpea":"pois chiche","ground beef":"bœuf haché","ground lamb":"agneau haché",
+ "chicken breast":"blanc de poulet","chicken breasts":"blancs de poulet","chicken thighs":"cuisses de poulet",
+ "lamb shoulder":"épaule d'agneau","cooking spray":"spray de cuisson","cream cheese":"fromage frais",
+ "goat cheese":"fromage de chèvre","fresh ginger":"gingembre frais","fresh parsley":"persil frais",
+ # ingrédients
+ "chickpeas":"pois chiches","lentils":"lentilles","couscous":"couscous","garlic":"ail","onion":"oignon",
+ "onions":"oignons","tomato":"tomate","tomatoes":"tomates","potato":"pomme de terre","potatoes":"pommes de terre",
+ "carrot":"carotte","carrots":"carottes","zucchini":"courgette","courgette":"courgette","eggplant":"aubergine",
+ "cucumber":"concombre","spinach":"épinards","cabbage":"chou","cauliflower":"chou-fleur","broccoli":"brocoli",
+ "mushrooms":"champignons","celery":"céleri","peas":"petits pois","beans":"haricots","corn":"maïs",
+ "pumpkin":"citrouille","squash":"courge","avocado":"avocat","avocados":"avocats","lemon":"citron","lemons":"citrons",
+ "lime":"citron vert","orange":"orange","oranges":"oranges","apple":"pomme","apples":"pommes","banana":"banane",
+ "dates":"dattes","raisins":"raisins secs","apricots":"abricots","figs":"figues","olives":"olives",
+ "almonds":"amandes","walnuts":"noix","pistachios":"pistaches","peanuts":"cacahuètes","honey":"miel",
+ "sugar":"sucre","salt":"sel","pepper":"poivre","flour":"farine","butter":"beurre","milk":"lait","cream":"crème",
+ "cheese":"fromage","yogurt":"yaourt","egg":"œuf","eggs":"œufs","water":"eau","oil":"huile","vinegar":"vinaigre",
+ "rice":"riz","pasta":"pâtes","bread":"pain","semolina":"semoule","chicken":"poulet","beef":"bœuf","lamb":"agneau",
+ "fish":"poisson","shrimp":"crevettes","salmon":"saumon","tuna":"thon","turkey":"dinde","meat":"viande",
+ "sausage":"saucisse","broth":"bouillon","stock":"bouillon","soup":"soupe","parsley":"persil",
+ "cilantro":"coriandre fraîche","coriander":"coriandre","mint":"menthe","basil":"basilic","thyme":"thym",
+ "rosemary":"romarin","oregano":"origan","cumin":"cumin","cinnamon":"cannelle","turmeric":"curcuma",
+ "ginger":"gingembre","paprika":"paprika","cayenne":"piment de Cayenne","chili":"piment","saffron":"safran",
+ "nutmeg":"muscade","cloves":"clous de girofle","cardamom":"cardamome","harissa":"harissa","tahini":"tahini",
+ "mustard":"moutarde","mayonnaise":"mayonnaise","chocolate":"chocolat","coconut":"noix de coco","wine":"vin",
+ "vegetables":"légumes","vegetable":"légume","paste":"concentré","sauce":"sauce","juice":"jus","zest":"zeste",
+ "leaves":"feuilles","seeds":"graines","powder":"poudre","spice":"épice","spices":"épices","mix":"mélange",
+ # adjectifs / mots courants
+ "ground":"moulu","fresh":"frais","dried":"séché","chopped":"haché","sliced":"tranché","diced":"en dés",
+ "minced":"émincé","grated":"râpé","crushed":"écrasé","roasted":"rôti","red":"rouge","green":"vert",
+ "white":"blanc","black":"noir","yellow":"jaune","large":"gros","small":"petit","medium":"moyen",
+ "whole":"entier","cubed":"en cubes","plain":"nature","and":"et","or":"ou","with":"avec","to taste":"selon le goût",
+ "for serving":"pour servir","for garnish":"pour décorer","divided":"divisé","optional":"facultatif",
+ # unités
+ "tablespoons":"c. à soupe","tablespoon":"c. à soupe","tbsp":"c. à soupe","teaspoons":"c. à café",
+ "teaspoon":"c. à café","tsp":"c. à café","cups":"tasses","cup":"tasse","ounces":"oz","ounce":"oz",
+ "pounds":"lb","pound":"lb","cans":"boîtes","can":"boîte","pinch":"pincée","bunch":"botte",
+ "slices":"tranches","slice":"tranche","stalks":"branches","stalk":"branche","handful":"poignée",
+ "cartons":"briques","carton":"brique","bag":"sachet","bags":"sachets","package":"paquet","jar":"bocal",
+}
+_FR_RE = re.compile(
+    r"(?<![\w-])(" + "|".join(re.escape(k) for k in sorted(FR, key=len, reverse=True)) + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def to_french(text):
+    """Traduction par dictionnaire (mots inconnus laissés tels quels)."""
+    if not isinstance(text, str):
+        return ""
+    out = _FR_RE.sub(lambda m: FR[m.group(1).lower()], text)
+    # En français l'adjectif se place après le nom : "moulu coriandre" -> "coriandre moulu"
+    out = re.sub(r"\b(moulu|séché|frais|haché|tranché|émincé|râpé|écrasé|rôti)\s+(?!d')([a-zéèêàçœ]{3,})\b",
+                 r"\2 \1", out)
+    out = re.sub(r"\bde ([aeiouéèœ])", r"d'\1", out)
+    return out
+
+
+
 def display_ingredient(ingredient):
     """Ingrédient complet (avec quantité) pour l'affichage dans la carte."""
     if not isinstance(ingredient, str):
         return ""
     text = html.unescape(ingredient).replace("\xa0", " ")
     text = re.sub(r"<[^>]*>", "", text)
+    text = re.sub(r"\badvertisement\b", "", text, flags=re.I)
+    text = re.sub(r"(\d)\s*-\s*(ounce|oz)\b\.?", r"\1 oz", text, flags=re.I)
+    text = re.sub(r"^\s*(?:and|or)\s+", "", text, flags=re.I)
     return re.sub(r"\s+", " ", text).strip(" \t\n,;:.-*•")
 
 
@@ -305,24 +437,35 @@ ingredient_options = build_options(data)
 # 6. RECUPERATION DES IMAGES
 # =====================================
 HEADERS = {"User-Agent": "FoodMindRecipeApp/1.0 (student project)"}
+_STOP = {"with", "and", "the", "free", "easy", "best", "simple", "quick", "homemade", "recipe",
+         "authentic", "traditional", "style", "from", "for", "gluten", "dairy", "soy"}
+
+
+def _tokens(text):
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in _STOP}
+
+
+def _similar(query, title):
+    """Vrai seulement si le titre trouvé ressemble vraiment au plat cherché
+    (évite d'afficher la photo d'un autre plat)."""
+    q, t = _tokens(query), _tokens(title)
+    if not q or not t:
+        return False
+    return len(q & t) >= max(1, -(-len(q) * 6 // 10))
 
 
 def _search_queries(recipe_name):
-    """Variantes de recherche : nom complet, puis versions simplifiées."""
     name = re.sub(r"\([^)]*\)", " ", recipe_name)
-    name = re.sub(r"\b(easy|best|simple|quick|homemade|authentic|traditional|recipe)\b", " ", name, flags=re.I)
     name = re.sub(r"\s+", " ", name).strip(" -,")
     short = re.split(r"\s+(?:with|and|&)\s+|,|\s-\s", name, flags=re.I)[0].strip()
-    words = name.split()
-    variants = [name, short]
-    if len(words) > 2:
-        variants += [" ".join(words[-2:]), " ".join(words[:2])]
-    seen, result = set(), []
-    for v in variants:
+    # "Vickys Ras-El-Hanout ..." -> enlever le prénom possessif en tête
+    short = re.sub(r"^\w+s'?s?\s+(?=[A-Z])", "", short) if re.match(r"^\w+ys\s", short) else short
+    seen, res = set(), []
+    for v in (name, short):
         if v and v.lower() not in seen:
             seen.add(v.lower())
-            result.append(v)
-    return result
+            res.append(v)
+    return res
 
 
 def _mealdb(query):
@@ -330,9 +473,9 @@ def _mealdb(query):
         r = requests.get("https://www.themealdb.com/api/json/v1/1/search.php",
                          params={"s": query}, timeout=6)
         r.raise_for_status()
-        meals = r.json().get("meals")
-        if meals and meals[0].get("strMealThumb"):
-            return meals[0]["strMealThumb"]
+        for meal in r.json().get("meals") or []:
+            if meal.get("strMealThumb") and _similar(query, meal.get("strMeal", "")):
+                return meal["strMealThumb"]
     except (requests.RequestException, ValueError, TypeError):
         pass
     return None
@@ -343,57 +486,34 @@ def _wikipedia(query):
         r = requests.get(
             "https://en.wikipedia.org/w/api.php",
             params={"action": "query", "generator": "search", "gsrsearch": query,
-                    "gsrlimit": 3, "prop": "pageimages", "piprop": "thumbnail",
+                    "gsrlimit": 5, "prop": "pageimages", "piprop": "thumbnail",
                     "pithumbsize": 700, "format": "json"},
             headers=HEADERS, timeout=6)
         r.raise_for_status()
         pages = r.json().get("query", {}).get("pages", {})
         for page in sorted(pages.values(), key=lambda p: p.get("index", 99)):
             thumb = page.get("thumbnail", {}).get("source")
-            if thumb:
+            if thumb and _similar(query, page.get("title", "")):
                 return thumb
     except (requests.RequestException, ValueError, TypeError):
         pass
     return None
 
 
-def _commons(query):
-    try:
-        r = requests.get(
-            "https://commons.wikimedia.org/w/api.php",
-            params={"action": "query", "generator": "search",
-                    "gsrsearch": f"{query} food", "gsrnamespace": 6, "gsrlimit": 5,
-                    "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 700, "format": "json"},
-            headers=HEADERS, timeout=6)
-        r.raise_for_status()
-        for page in r.json().get("query", {}).get("pages", {}).values():
-            info = page.get("imageinfo", [])
-            if info:
-                return info[0].get("thumburl") or info[0].get("url")
-    except (requests.RequestException, ValueError, TypeError):
-        pass
-    return None
-
-
 def fetch_image(recipe_name):
-    """Essaie plusieurs sources et plusieurs formulations du nom du plat."""
+    """Cherche une photo UNIQUEMENT si son titre correspond au plat.
+    Sinon None : on préfère un joli visuel de remplacement à une mauvaise photo."""
     if not isinstance(recipe_name, str) or not recipe_name.strip():
         return None
     queries = _search_queries(recipe_name)
     for q in queries:
-        url = _mealdb(q)
+        url = _mealdb(q) or _wikipedia(q)
         if url:
             return url
-    for q in queries[:2]:
-        url = _wikipedia(f"{q} dish")
-        if url:
-            return url
-    return _commons(queries[0])
+    return None
 
 
 def get_images(names):
-    """Récupère les images en parallèle. Les échecs ne sont PAS mis en cache,
-    donc un plat sans image sera retenté à la prochaine recherche."""
     cache = st.session_state.setdefault("img_cache", {})
     missing = [n for n in names if n not in cache]
     if missing:
@@ -402,6 +522,25 @@ def get_images(names):
                 if url:
                     cache[n] = url
     return {n: cache.get(n) for n in names}
+
+
+def placeholder_for(recipe_name, ingredients):
+    """Emoji + type de plat, déduits du nom et des ingrédients."""
+    text = (recipe_name + " " + " ".join(i for i in ingredients if isinstance(i, str))).lower()
+    rules = [
+        (("tagine", "tajine"), "🫕", "Tajine"), (("couscous",), "🍚", "Couscous"),
+        (("soup", "harira", "broth"), "🍜", "Soupe"), (("salad", "salade"), "🥗", "Salade"),
+        (("bread", "msemen", "baghrir", "pancake"), "🫓", "Pain & crêpes"),
+        (("cake", "cookie", "dessert", "sweet", "pastry", "dough"), "🍰", "Dessert"),
+        (("spice", "ras el hanout", "seasoning", "mix"), "🌶️", "Épices"),
+        (("chicken", "poultry"), "🍗", "Poulet"), (("lamb", "beef", "meat", "kefta", "kebab"), "🍖", "Viande"),
+        (("fish", "salmon", "tuna", "shrimp"), "🐟", "Poisson"), (("lentil", "chickpea", "bean"), "🫘", "Légumineuses"),
+        (("rice", "pasta"), "🍚", "Plat complet"),
+    ]
+    for keys, emoji, label in rules:
+        if any(k in text for k in keys):
+            return emoji, label
+    return "🍲", "Plat marocain"
 
 
 # =====================================
@@ -419,7 +558,8 @@ with st.container(border=True):
     selected_ingredients = st.multiselect(
         "Sélectionnez vos ingrédients",
         options=ingredient_options,
-        placeholder="Tapez pour rechercher : tomato, lentils, onion...",
+        format_func=to_french,
+        placeholder="Tapez pour rechercher : tomates, lentilles, oignon...",
         label_visibility="collapsed",
     )
     c1, c2 = st.columns([2, 1])
@@ -434,6 +574,26 @@ with st.container(border=True):
 # =====================================
 # 8. RECHERCHE DES RECETTES
 # =====================================
+def dish_emoji(name):
+    n = str(name).lower()
+    rules = [
+        (("soup", "harira", "stew", "broth"), "🍲"), (("tagine", "tajine"), "🥘"),
+        (("salad", "zaalouk", "taktouka"), "🥗"), (("chicken", "poultry"), "🍗"),
+        (("lamb", "beef", "kefta", "kebab", "meat", "mince"), "🥩"),
+        (("fish", "sardine", "salmon", "shrimp", "seafood"), "🐟"),
+        (("couscous", "rice", "pasta", "lentil"), "🍚"),
+        (("cake", "cookie", "dessert", "sweet", "pastry", "chebakia", "date"), "🍰"),
+        (("bread", "msemen", "baghrir", "pancake", "khobz"), "🍞"),
+        (("tea", "drink", "juice"), "🍵"), (("egg", "omelet"), "🍳"),
+        (("spice", "ras-el-hanout", "ras el hanout", "seasoning", "mix"), "🧂"),
+        (("potato", "carrot", "vegetable", "pumpkin", "zucchini"), "🥕"),
+    ]
+    for keys, emoji in rules:
+        if any(k in n for k in keys):
+            return emoji
+    return "🍽️"
+
+
 def render_card(recipe, image_url, selected):
     esc = html.escape
     desc = recipe["Description"]
@@ -441,19 +601,22 @@ def render_card(recipe, image_url, selected):
 
     chips = []
     for ing in recipe["Ingredients"]:
-        label = display_ingredient(ing)
-        if not label:
+        raw = display_ingredient(ing)
+        if not raw:
             continue
-        hit = any(s in label.lower() for s in selected)
-        chips.append(f'<span class="fm-chip{" hit" if hit else ""}">{esc(label)}</span>')
+        hit = any(s in raw.lower() for s in selected)
+        chips.append(f'<span class="fm-chip{" hit" if hit else ""}">{esc(to_french(raw))}</span>')
 
-    media = (f'<img src="{esc(image_url, quote=True)}" alt="{esc(recipe["Recipe_Name"])}" loading="lazy">'
-             if image_url else "🍲")
+    if image_url:
+        media = f'<div class="fm-img"><img src="{esc(image_url, quote=True)}" alt="{esc(str(recipe["Recipe_Name"]))}" loading="lazy"></div>'
+    else:
+        emoji, label = placeholder_for(str(recipe["Recipe_Name"]), recipe["Ingredients"])
+        media = f'<div class="fm-img ph">{emoji}<span>{label}</span></div>'
     pct = recipe["Score"] * 100
 
     return (
         '<div class="fm-card">'
-        f'<div class="fm-img">{media}</div>'
+        f'{media}'
         '<div class="fm-body">'
         '<div class="fm-top">'
         f'<h3 class="fm-title">{esc(str(recipe["Recipe_Name"]))}</h3>'
