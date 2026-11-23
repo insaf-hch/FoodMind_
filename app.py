@@ -254,7 +254,9 @@ _CONTAINER = (r"(?:cans?|cartons?|bags?|packages?|packets?|pkgs?|boxes?|jars?|bo
 _WORDS = (r"(?:large|medium|small|big|whole|prepared|fresh|freshly|dried|canned|frozen|"
           r"ripe|raw|cooked|chopped|diced|minced|mashed|sliced|roasted|grated|crushed|"
           r"shredded|finely|roughly|thinly|peeled|pitted|packed|heaping|level|cubed|cut|"
-          r"halved|quartered|trimmed|boneless|skinless|toasted|rinsed|drained|softened|melted)")
+          r"halved|quartered|trimmed|boneless|skinless|toasted|rinsed|drained|softened|melted|ground|extra|virgin|cold|warm|hot|boiling|lukewarm|ice|tap|filtered|"
+          r"unsalted|salted|light|dark|organic|plain|kosher|sea|coarse|coarsely|cracked|good|quality|"
+          r"low-sodium|reduced-sodium)")
 
 _LEADING = re.compile(
     rf"^\s*(?:(?:and|or|plus|with|of|the|a|an)\s+)?"
@@ -303,14 +305,26 @@ def clean_ingredient_name(ingredient):
     text = re.sub(r"\s+(?:to taste|for serving|for garnish|as needed|divided|drained|rinsed)$", "", text)
     text = re.sub(r"\s+", " ", text).strip(" \t\n,;:.-*")
 
+    text = re.split(r"\s+(?:such as|like|e\.g\.)\s+", text)[0]
+
     if not text or len(text) < 2 or re.search(r"\d", text):
         return None
+
+    # Regrouper les variantes d'un même ingrédient de base
+    if text == "pepper":
+        text = "black pepper"
+    if re.fullmatch(r"(?:[a-z-]+ )?water", text):          # cold water, warm water...
+        text = "water"
+    if text.endswith("olive oil"):
+        text = "olive oil"
+    if text.endswith(" salt") or text == "salt":
+        text = "salt"
 
     invalid_phrases = (
         "can also", "can be added", "added to", "to the vegetables",
         "optional", "according to taste", "about",
     )
-    if any(p in text for p in invalid_phrases) or len(text.split()) > 5:
+    if any(p in text for p in invalid_phrases) or len(text.split()) > 4:
         return None
 
     return text
@@ -350,6 +364,12 @@ FR = {
  "lamb shoulder":"épaule d'agneau","cooking spray":"spray de cuisson","cream cheese":"fromage frais",
  "goat cheese":"fromage de chèvre","fresh ginger":"gingembre frais","fresh parsley":"persil frais",
  # ingrédients
+ "ground cloves":"clous de girofle moulus","ground cardamom":"cardamome moulue","green cardamom":"cardamome verte",
+ "ground green cardamom":"cardamome verte moulue","dried bay leaves":"feuilles de laurier séchées",
+ "star anise":"anis étoilé","fennel seeds":"graines de fenouil","ground fennel seeds":"graines de fenouil moulues",
+ "fenugreek":"fenugrec","allspice":"piment de la Jamaïque","mace":"macis","lavender buds":"boutons de lavande",
+ "chilli powder":"piment en poudre","chilli":"piment","extra virgin olive oil":"huile d'olive extra vierge",
+ "cayenne pepper":"piment de Cayenne","ground cayenne":"piment de Cayenne moulu",
  "chickpeas":"pois chiches","lentils":"lentilles","couscous":"couscous","garlic":"ail","onion":"oignon",
  "onions":"oignons","tomato":"tomate","tomatoes":"tomates","potato":"pomme de terre","potatoes":"pommes de terre",
  "carrot":"carotte","carrots":"carottes","zucchini":"courgette","courgette":"courgette","eggplant":"aubergine",
@@ -390,14 +410,26 @@ _FR_RE = re.compile(
 )
 
 
+ADJ_FR = {"ground", "dried", "fresh", "chopped", "sliced", "minced", "grated", "crushed", "roasted"}
+
+
 def to_french(text):
     """Traduction par dictionnaire (mots inconnus laissés tels quels)."""
     if not isinstance(text, str):
         return ""
+    # L'adjectif se place après le nom en français : "ground cumin" -> "cumin ground"
+    skip = {"black", "red", "white", "green", "yellow", "olive", "sweet", "bell", "hot", "bay", "star"}
+    def swap(m):
+        adj, noun = m.group(1).lower(), m.group(2).lower()
+        if f"{adj} {noun}" in FR or noun in skip or noun in ADJ_FR:
+            return m.group(0)
+        return f"{noun} {adj}"
+    text = re.sub(r"\b(ground|dried|fresh|chopped|sliced|minced|grated|crushed|roasted)\s+([A-Za-z]+)\b", swap, text, flags=re.I)
     out = _FR_RE.sub(lambda m: FR[m.group(1).lower()], text)
-    # En français l'adjectif se place après le nom : "moulu coriandre" -> "coriandre moulu"
-    out = re.sub(r"\b(moulu|séché|frais|haché|tranché|émincé|râpé|écrasé|rôti)\s+(?!d')([a-zéèêàçœ]{3,})\b",
-                 r"\2 \1", out)
+    # Accord au féminin pour quelques noms courants
+    fem = r"(cannelle|coriandre|cardamome|muscade|moutarde|lavande|menthe|sauge|vanille)"
+    for m_, f_ in (("moulu", "moulue"), ("séché", "séchée"), ("frais", "fraîche"), ("haché", "hachée"), ("râpé", "râpée")):
+        out = re.sub(rf"\b{fem} {m_}\b", rf"\1 {f_}", out)
     out = re.sub(r"\bde ([aeiouéèœ])", r"d'\1", out)
     return out
 
@@ -409,6 +441,8 @@ def display_ingredient(ingredient):
         return ""
     text = html.unescape(ingredient).replace("\xa0", " ")
     text = re.sub(r"<[^>]*>", "", text)
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = text.split(",")[0]
     text = re.sub(r"\badvertisement\b", "", text, flags=re.I)
     text = re.sub(r"(\d)\s*-\s*(ounce|oz)\b\.?", r"\1 oz", text, flags=re.I)
     text = re.sub(r"^\s*(?:and|or)\s+", "", text, flags=re.I)
@@ -419,18 +453,22 @@ def display_ingredient(ingredient):
 # 5. GENERATION DE LA LISTE DE RECHERCHE
 # =====================================
 @st.cache_data
-def build_options(_data):
-    names = set()
+def build_options(_data, min_recipes=2):
+    """Ingrédients de base, triés du plus courant au plus rare.
+    Ceux présents dans une seule recette (souvent du bruit) sont masqués."""
+    counts = {}
     for ingredients in _data["Ingredients_List"]:
         if isinstance(ingredients, list):
-            for ing in ingredients:
-                name = clean_ingredient_name(ing)
-                if name:
-                    names.add(name)
-    return sorted(names)
+            names = {clean_ingredient_name(i) for i in ingredients}
+            for n in names:
+                if n:
+                    counts[n] = counts.get(n, 0) + 1
+    kept = {n: c for n, c in counts.items() if c >= min_recipes} or counts
+    ordered = sorted(kept, key=lambda n: (-kept[n], n))
+    return ordered, kept
 
 
-ingredient_options = build_options(data)
+ingredient_options, ingredient_counts = build_options(data)
 
 
 # =====================================
@@ -445,13 +483,27 @@ def _tokens(text):
     return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in _STOP}
 
 
+_DISH_WORDS = {"tagine", "tajine", "couscous", "harira", "hummus", "falafel", "shakshuka", "baklava",
+               "tabbouleh", "pastilla", "bastilla", "msemen", "baghrir", "harissa", "kefta", "zaalouk",
+               "tanjia", "mechoui", "rfissa", "briouat", "chebakia", "sellou"}
+
+
 def _similar(query, title):
-    """Vrai seulement si le titre trouvé ressemble vraiment au plat cherché
-    (évite d'afficher la photo d'un autre plat)."""
+    """MealDB : il faut au moins 2 mots en commun (ou tous, si le nom est court)."""
     q, t = _tokens(query), _tokens(title)
     if not q or not t:
         return False
-    return len(q & t) >= max(1, -(-len(q) * 6 // 10))
+    need = len(q) if len(q) <= 2 else -(-len(q) * 6 // 10)
+    return len(q & t) >= need
+
+
+def _wiki_ok(query, title):
+    """Wikipedia : le titre de l'article doit être contenu dans le nom du plat
+    (ex. « Ras el hanout »), jamais un mot générique comme « Chicken »."""
+    q, t = _tokens(query), _tokens(title)
+    if not t or not t <= q:
+        return False
+    return len(t) >= 2 or bool(t & _DISH_WORDS)
 
 
 def _search_queries(recipe_name):
@@ -493,7 +545,7 @@ def _wikipedia(query):
         pages = r.json().get("query", {}).get("pages", {})
         for page in sorted(pages.values(), key=lambda p: p.get("index", 99)):
             thumb = page.get("thumbnail", {}).get("source")
-            if thumb and _similar(query, page.get("title", "")):
+            if thumb and _wiki_ok(query, page.get("title", "")):
                 return thumb
     except (requests.RequestException, ValueError, TypeError):
         pass
@@ -505,7 +557,7 @@ def fetch_image(recipe_name):
     Sinon None : on préfère un joli visuel de remplacement à une mauvaise photo."""
     if not isinstance(recipe_name, str) or not recipe_name.strip():
         return None
-    queries = _search_queries(recipe_name)
+    queries = _search_queries(clean_title(recipe_name))
     for q in queries:
         url = _mealdb(q) or _wikipedia(q)
         if url:
@@ -558,7 +610,7 @@ with st.container(border=True):
     selected_ingredients = st.multiselect(
         "Sélectionnez vos ingrédients",
         options=ingredient_options,
-        format_func=to_french,
+        format_func=lambda n: f"{to_french(n)}  ·  {ingredient_counts.get(n, 0)} recettes",
         placeholder="Tapez pour rechercher : tomates, lentilles, oignon...",
         label_visibility="collapsed",
     )
@@ -594,6 +646,17 @@ def dish_emoji(name):
     return "🍽️"
 
 
+def clean_title(name):
+    """Enlève le prénom de l'auteur ("Vickys ...") et les mentions régime (", Gluten-Free")."""
+    s = html.unescape(str(name)).strip()
+    s = re.split(r",|\s[-–|]\s", s)[0]
+    s = re.sub(r"\b(?:gluten|dairy|egg|soy|nut|sugar)[- ]free\b", "", s, flags=re.I)
+    m = re.match(r"^[A-Z][a-z]+(?:ys|'s|’s)\s+(.+)", s)
+    if m:
+        s = m.group(1)
+    return re.sub(r"\s+", " ", s).strip(" &-,") or str(name)
+
+
 def render_card(recipe, image_url, selected):
     esc = html.escape
     desc = recipe["Description"]
@@ -608,9 +671,9 @@ def render_card(recipe, image_url, selected):
         chips.append(f'<span class="fm-chip{" hit" if hit else ""}">{esc(to_french(raw))}</span>')
 
     if image_url:
-        media = f'<div class="fm-img"><img src="{esc(image_url, quote=True)}" alt="{esc(str(recipe["Recipe_Name"]))}" loading="lazy"></div>'
+        media = f'<div class="fm-img"><img src="{esc(image_url, quote=True)}" alt="{esc(clean_title(recipe["Recipe_Name"]))}" loading="lazy"></div>'
     else:
-        emoji, label = placeholder_for(str(recipe["Recipe_Name"]), recipe["Ingredients"])
+        emoji, label = placeholder_for(clean_title(recipe["Recipe_Name"]), recipe["Ingredients"])
         media = f'<div class="fm-img ph">{emoji}<span>{label}</span></div>'
     pct = recipe["Score"] * 100
 
@@ -619,7 +682,7 @@ def render_card(recipe, image_url, selected):
         f'{media}'
         '<div class="fm-body">'
         '<div class="fm-top">'
-        f'<h3 class="fm-title">{esc(str(recipe["Recipe_Name"]))}</h3>'
+        f'<h3 class="fm-title">{esc(clean_title(recipe["Recipe_Name"]))}</h3>'
         f'<div class="fm-score">{pct:.0f}%<small>compatibilité</small></div>'
         '</div>'
         f'<p class="fm-desc">{desc}</p>'
@@ -629,6 +692,8 @@ def render_card(recipe, image_url, selected):
         '</div></div>'
     )
 
+
+IMAGE_COL = next((c for c in data.columns if any(k in c.lower() for k in ("image", "photo", "img", "thumbnail"))), None)
 
 if search:
     if not selected_ingredients:
@@ -650,11 +715,13 @@ if search:
                     "Description": r["Description"],
                     "Ingredients": r["Ingredients_List"],
                     "Score": float(s),
+                    "Image": (r[IMAGE_COL] if IMAGE_COL and isinstance(r[IMAGE_COL], str)
+                              and r[IMAGE_COL].startswith("http") else None),
                 } for r, s in zip(rows, scores)],
                 key=lambda x: x["Score"], reverse=True,
             )[:number_recipes]
 
-            images = get_images([r["Recipe_Name"] for r in results])
+            images = get_images([r["Recipe_Name"] for r in results if not r["Image"]])
 
         st.markdown("## Vos recettes recommandées")
         if not results:
@@ -662,5 +729,5 @@ if search:
         else:
             selected_lower = [s.lower() for s in selected_ingredients]
             for recipe in results:
-                st.markdown(render_card(recipe, images.get(recipe["Recipe_Name"]), selected_lower),
+                st.markdown(render_card(recipe, recipe["Image"] or images.get(recipe["Recipe_Name"]), selected_lower),
                             unsafe_allow_html=True)
